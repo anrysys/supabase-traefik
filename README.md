@@ -79,5 +79,23 @@ After configuring all the files, you can start the Supabase services using Docke
 docker-compose up -d
 ```
 
-`Log level INFO|DEBUG|ERROR`
+Change `Log level INFO|DEBUG|ERROR` in file https://github.com/anrysys/supabase-traefik/blob/main/traefik/traefik/traefik.yml
+
+---
+
+### Set password (for file .htpasswd)
+
+1. Generate a hashed password (enter your password after entering the command):
+
+```bash
+hashed_password=$(openssl passwd -apr1)
+```
+2. Saving a file with a hashed password:
+
+```bash
+echo "YOUR-LOGIN:$hashed_password" > ./traefik/.htpasswd
+sudo chown root:root ./traefik/.htpasswd
+sudo chmod 600 ./traefik/.htpasswd
+```
+
 
