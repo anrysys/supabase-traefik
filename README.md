@@ -1,4 +1,4 @@
-# Supabase Docker with Traefik
+# Supabase Docker with Traefik for deploy production
 
 Note: this setup is unofficial. It is supported by the Supabase community only.
 
