@@ -3,7 +3,7 @@ global:
   sendAnonymousUsage: false
 
 serversTransport:
-  insecureSkipVerify: true
+  insecureSkipVerify: false
 
 entryPoints:
   # Not used in apps, but redirect everything from HTTP to HTTPS
@@ -23,9 +23,9 @@ entryPoints:
         # Generate a wildcard domain certificate
         certResolver: letsencrypt
         domains:
-          - main: $DOMAIN
+          - main: YOUR-DOMAIN.com
             sans:
-              - '*.$DOMAIN'
+              - '*.YOUR-DOMAIN.com'
       middlewares:
         - securityHeaders@file
 
@@ -42,8 +42,8 @@ providers:
     watch: true
     network: supabase
     # Default host rule to containername.domain.example
-    defaultRule: "Host(`{{ lower (trimPrefix `/` .Name )}}.$DOMAIN`)"
-    swarmModeRefreshSeconds: 15s
+    defaultRule: "Host(`{{ lower (trimPrefix `/` .Name )}}.YOUR-DOMAIN.com`)"
+    # swarmModeRefreshSeconds: 15s
     exposedByDefault: false
 
 # Enable traefik ui
@@ -53,14 +53,16 @@ api:
 
 # Log level INFO|DEBUG|ERROR
 log:
-  level: INFO
+  level: DEBUG
 
-# Use letsencrypt to generate ssl serficiates
+# Use letsencrypt to generate ssl serficiates (DISABLE SECTION FOR TESTING)
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: $CLOUDFLARE_EMAIL
+      email: anrysys@gmail.com
       storage: /etc/traefik/acme.json
+      httpChallenge:
+        entryPoint: http
       dnsChallenge:
         provider: cloudflare
         # Used to make sure the dns challenge is propagated to the rights dns servers
