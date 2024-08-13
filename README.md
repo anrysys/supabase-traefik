@@ -8,6 +8,12 @@ Please make sure you read the [self-hosting guide](https://supabase.io/docs/guid
 
 ## Setup Instructions
 
+Change the values ​​in all files that start with `YOUR-`
+Example:
+      `YOUR-TOKEN-FROM-CLOUDFLARE`
+      `YOU-EMAIL-FROM-CLOUDFLARE@gmail.com`
+      `YOUR-DOMAIN.com`
+
 ### Cloning the Repository
 
 First, clone this repository:
