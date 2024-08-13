@@ -4,15 +4,19 @@
 #   Stop:           docker compose down
 #   Destroy:        docker compose -f docker-compose.yml -f ./dev/docker-compose.dev.yml down -v --remove-orphans
 
-version: "3.8"
+name: supabase
+# version: "3.8"
+
 services:
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   studio:
     container_name: supabase-studio
-    image: supabase/studio:20240101-8e4a094
+    image: supabase/studio:20240729-ce42139
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.studio.rule=Host(`api.${DOMAIN}`)"
+      - "traefik.http.routers.studio.entrypoints=https"
+      - "traefik.http.services.studio.loadbalancer.server.port=8000"    
     healthcheck:
       test:
         [
@@ -27,6 +31,8 @@ services:
     depends_on:
       analytics:
         condition: service_healthy
+    expose:
+      - 8080
     environment:
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -38,6 +44,7 @@ services:
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
 
       LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
       LOGFLARE_URL: http://analytics:4000
@@ -48,18 +55,18 @@ services:
       # NEXT_ANALYTICS_BACKEND_PROVIDER: bigquery
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   kong:
     container_name: supabase-kong
     image: kong:2.8.1
     restart: unless-stopped
     # https://unix.stackexchange.com/a/294837
     entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
-    ports:
-      - ${KONG_HTTP_PORT}:8000/tcp
-      - ${KONG_HTTPS_PORT}:8443/tcp
+    # ports:
+    #   - ${KONG_HTTP_PORT}:8000/tcp
+    #   - ${KONG_HTTPS_PORT}:8443/tcp
+    expose:
+      - ${KONG_HTTP_PORT}
+      - ${KONG_HTTPS_PORT}
     depends_on:
       analytics:
         condition: service_healthy
@@ -80,12 +87,9 @@ services:
       - ./volumes/api/kong.yml:/home/kong/temp.yml:ro
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   auth:
     container_name: supabase-auth
-    image: supabase/gotrue:v2.132.3
+    image: supabase/gotrue:v2.151.0
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -125,6 +129,7 @@ services:
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
 
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
       GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
       # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
@@ -141,14 +146,22 @@ services:
 
       GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
       GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      # Uncomment to enable custom access token hook. You'll need to create a public.custom_access_token_hook function and grant necessary permissions.
+      # See: https://supabase.com/docs/guides/auth/auth-hooks#hook-custom-access-token for details
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED="true"
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI="pg-functions://postgres/public/custom_access_token_hook"
+
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_ENABLED="true"
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_URI="pg-functions://postgres/public/mfa_verification_attempt"
+
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED="true"
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI="pg-functions://postgres/public/password_verification_attempt"
     networks:
       - supabase
 
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   rest:
     container_name: supabase-rest
-    image: postgrest/postgrest:v12.0.1
+    image: postgrest/postgrest:v12.2.0
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -167,14 +180,10 @@ services:
     command: "postgrest"
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
-    image: supabase/realtime:v2.25.50
+    image: supabase/realtime:v2.30.23
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -185,9 +194,14 @@ services:
       test:
         [
           "CMD",
-          "bash",
-          "-c",
-          "printf \\0 > /dev/tcp/localhost/4000"
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "-H",
+          "Authorization: Bearer ${ANON_KEY}",
+          "http://localhost:4000/api/tenants/realtime-dev/health"
         ]
       timeout: 5s
       interval: 5s
@@ -203,23 +217,18 @@ services:
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
       DB_ENC_KEY: supabaserealtime
       API_JWT_SECRET: ${JWT_SECRET}
-      FLY_ALLOC_ID: fly123
-      FLY_APP_NAME: realtime
       SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
       ERL_AFLAGS: -proto_dist inet_tcp
-      ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
-    command: >
-      sh -c "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: true
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
+  # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
     container_name: supabase-storage
-    image: supabase/storage-api:v0.43.11
+    image: supabase/storage-api:v1.0.6
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -261,10 +270,6 @@ services:
       - ./volumes/storage:/var/lib/storage:z
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
   imgproxy:
     container_name: supabase-imgproxy
     image: darthsim/imgproxy:v3.8.0
@@ -282,13 +287,9 @@ services:
       - ./volumes/storage:/var/lib/storage:z
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
   meta:
     container_name: supabase-meta
-    image: supabase/postgres-meta:v0.75.0
+    image: supabase/postgres-meta:v0.83.2
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -305,13 +306,9 @@ services:
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
   functions:
     container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.29.1
+    image: supabase/edge-runtime:v1.55.0
     restart: unless-stopped
     depends_on:
       analytics:
@@ -332,10 +329,6 @@ services:
       - /home/deno/functions/main
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
-
   analytics:
     container_name: supabase-analytics
     image: supabase/logflare:1.4.0
@@ -356,7 +349,7 @@ services:
     #     target: /opt/app/rel/logflare/bin/gcloud.json
     #     read_only: true
     environment:
-      LOGFLARE_NODE_HOST:  127.0.0.1
+      LOGFLARE_NODE_HOST: 127.0.0.1
       DB_USERNAME: supabase_admin
       DB_DATABASE: ${POSTGRES_DB}
       DB_HOSTNAME: ${POSTGRES_HOST}
@@ -366,26 +359,25 @@ services:
       LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
       LOGFLARE_SINGLE_TENANT: true
       LOGFLARE_SUPABASE_MODE: true
+      LOGFLARE_MIN_CLUSTER_SIZE: 1
 
       # Comment variables to use Big Query backend for analytics
       POSTGRES_BACKEND_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       POSTGRES_BACKEND_SCHEMA: _analytics
       LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
-
       # Uncomment to use Big Query backend for analytics
       # GOOGLE_PROJECT_ID: ${GOOGLE_PROJECT_ID}
       # GOOGLE_PROJECT_NUMBER: ${GOOGLE_PROJECT_NUMBER}
-    ports:
-      - 4000:4000
+    # ports:
+    #   - 4000:4000
+    expose:
+      - 4000
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   # Comment out everything below this point if you are using an external Postgres database
   db:
     container_name: supabase-db
-    image: supabase/postgres:15.1.0.147
+    image: supabase/postgres:15.1.1.78
     healthcheck:
       test: pg_isready -U postgres -h localhost
       interval: 5s
@@ -401,9 +393,11 @@ services:
       - -c
       - log_min_messages=fatal # prevents Realtime polling queries from appearing in logs
     restart: unless-stopped
-    ports:
-      # Pass down internal port because it's set dynamically by other services
-      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    # ports:
+    #   # Pass down internal port because it's set dynamically by other services
+    #   - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    expose:
+      - ${POSTGRES_PORT}      
     environment:
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: ${POSTGRES_PORT}
@@ -426,12 +420,10 @@ services:
       - ./volumes/db/data:/var/lib/postgresql/data:Z
       # Changes required for Analytics support
       - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      # Use named volume to persist pgsodium decryption key between restarts
+      - db-config:/etc/postgresql-custom
     networks:
       - supabase
-
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
   vector:
     container_name: supabase-vector
     image: timberio/vector:0.28.1-alpine
@@ -452,14 +444,15 @@ services:
     volumes:
       - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro
       - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro
-
+    environment:
+      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
     command: [ "--config", "etc/vector/vector.yml" ]
     networks:
       - supabase
-
-# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- #
-
+volumes:
+  db-config:
 networks:
   supabase:
     driver: bridge
     external: true
+    
