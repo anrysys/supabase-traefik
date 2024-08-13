@@ -1,28 +1,21 @@
-version: '3.9'
+# version: '3.9'
 services:
   traefik:
     container_name: traefik
     hostname: traefik
     image: traefik:latest
     ports:
-      - 8001:80
-      - 44301:443
-      - 8181:8080
+      - 80:80
+      - 443:443
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik/:/etc/traefik/
     networks:
-      - supabase # rename this to your custom docker network
-    
-#    labels:   # Only for Traefik, unless you use the fileConfig.yml file.
-#      traefik.http.routers.api.rule: Host(`traefik.domain.com`)    # Define the subdomain for the traefik dashboard.
-#      traefik.http.routers.api.entryPoints: https    # Set the Traefik entry point.
-#      traefik.http.routers.api.service: api@internal    # Enable Traefik API.
-#      traefik.enable: true   # Enable Traefik reverse proxy for the Traefik dashboard.
+      - supabase
     environment:
-      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
-      CLOUDFLARE_EMAIL: ${$CLOUDFLARE_EMAIL}
-      DOMAIN: ${DOMAIN}
+      CF_DNS_API_TOKEN: YOUR-TOKEN-FROM-CLOUDFLARE
+      CLOUDFLARE_EMAIL: YOU-EMAIL-FROM-CLOUDFLARE@gmail.com
+      DOMAIN: YOUR-DOMAIN.com
     restart: unless-stopped
     depends_on:
       - dockersocket
