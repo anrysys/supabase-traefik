@@ -78,3 +78,4 @@ After configuring all the files, you can start the Supabase services using Docke
 ```bash
 docker-compose up -d
 ```
+Choose Log level INFO|DEBUG|ERROR
